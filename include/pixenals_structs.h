@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <string.h>
 
-#include <pixenals_alloc_utils.h>
+#include "../../pixenals-alloc-utils/include/pixenals_alloc_utils.h"
 
 #include <types.h>
 
@@ -46,6 +46,19 @@ typedef enum SearchResult {
 	STUC_SEARCH_NOT_FOUND,
 	STUC_SEARCH_ADDED
 } SearchResult;
+
+static inline
+U32 stucFnvHash(const U8 *value, I32 valueSize, U32 size) {
+	PIX_ERR_ASSERT("", value && valueSize > 0 && size > 0);
+	U32 hash = 2166136261;
+	for (I32 i = 0; i < valueSize; ++i) {
+		hash ^= value[i];
+		hash *= 16777619;
+	}
+	hash %= size;
+	PIX_ERR_ASSERT("", hash >= 0);
+	return hash;
+}
 
 void stucHTableInit(
 	const PixalcFPtrs *pAlloc,
