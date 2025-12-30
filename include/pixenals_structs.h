@@ -7,44 +7,50 @@ SPDX-License-Identifier: Apache-2.0
 #include <string.h>
 
 #include "../../pixenals-alloc-utils/include/pixenals_alloc_utils.h"
+#include "../../pixenals-error-utils/include/pixenals_error_utils.h"
 
-#include <types.h>
-
-#ifndef STUC_FORCE_INLINE
+#ifndef PIX_FORCE_INLINE
 #ifdef WIN32
-#define STUC_FORCE_INLINE __forceinline
+#define PIX_FORCE_INLINE __forceinline
 #else
-#define STUC_FORCE_INLINE __attribute__((always_inline)) static inline
+#define PIX_FORCE_INLINE __attribute__((always_inline)) static inline
 #endif
 #endif
 
-typedef struct HTableEntryCore {
-	struct HTableEntryCore *pNext;
-} HTableEntryCore;
+typedef int32_t I32;
+typedef int64_t I64;
+typedef uint8_t U8;
+typedef uint32_t U32;
+typedef uint64_t U64;
+typedef float F32;
 
-typedef struct HTableBucket {
-	HTableEntryCore *pList;
-} HTableBucket;
+typedef struct PixuctHTableEntryCore {
+	struct PixuctHTableEntryCore *pNext;
+} PixuctHTableEntryCore;
 
-#define STUC_HTABLE_ALLOC_HANDLES_MAX 2
+typedef struct PixuctHTableBucket {
+	PixuctHTableEntryCore *pList;
+} PixuctHTableBucket;
 
-typedef struct HTable {
+#define PIX_HTABLE_ALLOC_HANDLES_MAX 2
+
+typedef struct PixuctHTable {
 	const PixalcFPtrs *pAlloc;
-	PixalcLinAlloc allocHandles[STUC_HTABLE_ALLOC_HANDLES_MAX];
-	HTableBucket *pTable;
+	PixalcLinAlloc allocHandles[PIX_HTABLE_ALLOC_HANDLES_MAX];
+	PixuctHTableBucket *pTable;
 	void *pUserData;
 	I32 size;
-} HTable;
+} PixuctHTable;
 
-typedef struct StucKey {
+typedef struct PixuctKey {
 	const void *pKey;
 	I32 size;
-} StucKey;
+} PixuctKey;
 
 typedef enum SearchResult {
-	STUC_SEARCH_FOUND,
-	STUC_SEARCH_NOT_FOUND,
-	STUC_SEARCH_ADDED
+	PIX_SEARCH_FOUND,
+	PIX_SEARCH_NOT_FOUND,
+	PIX_SEARCH_ADDED
 } SearchResult;
 
 static inline
@@ -60,42 +66,42 @@ U32 stucFnvHash(const U8 *value, I32 valueSize, U32 size) {
 	return hash;
 }
 
-void stucHTableInit(
+void pixuctHTableInit(
 	const PixalcFPtrs *pAlloc,
-	HTable *pHandle,
+	PixuctHTable *pHandle,
 	I32 targetSize,
-	I32Arr allocTypeSizes,
+	PixtyI32Arr allocTypeSizes,
 	void *pUserData
 );
-void stucHTableDestroy(HTable *pHandle);
-PixalcLinAlloc *stucHTableAllocGet(HTable *pHandle, I32 idx);
-const PixalcLinAlloc *stucHTableAllocGetConst(const HTable *pHandle, I32 idx);
-HTableBucket *stucHTableBucketGet(HTable *pHandle, StucKey key);
-STUC_FORCE_INLINE
-SearchResult stucHTableGet(
-	HTable *pHandle,
+void pixuctHTableDestroy(PixuctHTable *pHandle);
+PixalcLinAlloc *pixuctHTableAllocGet(PixuctHTable *pHandle, I32 idx);
+const PixalcLinAlloc *pixuctHTableAllocGetConst(const PixuctHTable *pHandle, I32 idx);
+PixuctHTableBucket *pixuctHTableBucketGet(PixuctHTable *pHandle, PixuctKey key);
+PIX_FORCE_INLINE
+SearchResult pixuctHTableGet(
+	PixuctHTable *pHandle,
 	I32 alloc,
 	const void *pKeyData,
 	void **ppEntry,
 	bool addEntry,
 	void *pInitInfo,
-	StucKey (* fpMakeKey)(const void *),
+	PixuctKey (* fpMakeKey)(const void *),
 	bool (* fpAddPredicate)(const void *, const void *, const void *),
-	void (* fpInitEntry)(void *, HTableEntryCore *, const void *, void *, I32),
-	bool (* fpCompareEntry)(const HTableEntryCore *, const void *, const void *)
+	void (* fpInitEntry)(void *, PixuctHTableEntryCore *, const void *, void *, I32),
+	bool (* fpCompareEntry)(const PixuctHTableEntryCore *, const void *, const void *)
 ) {
 	PIX_ERR_ASSERT("", pHandle->pTable && pHandle->size);
 	PIX_ERR_ASSERT(
 		"",
-		alloc < STUC_HTABLE_ALLOC_HANDLES_MAX && pHandle->allocHandles[alloc].valid
+		alloc < PIX_HTABLE_ALLOC_HANDLES_MAX && pHandle->allocHandles[alloc].valid
 	);
 	PIX_ERR_ASSERT("", (!addEntry || fpInitEntry) && fpCompareEntry);
-	HTableBucket *pBucket = stucHTableBucketGet(pHandle, fpMakeKey(pKeyData));
+	PixuctHTableBucket *pBucket = pixuctHTableBucketGet(pHandle, fpMakeKey(pKeyData));
 	if (!pBucket->pList) {
 		if (!addEntry ||
 			fpAddPredicate && !fpAddPredicate(pHandle->pUserData, pKeyData, pInitInfo)
 		) {
-			return STUC_SEARCH_NOT_FOUND;
+			return PIX_SEARCH_NOT_FOUND;
 		}
 		I32 linIdx =
 			pixalcLinAlloc(pHandle->allocHandles + alloc, (void **)&pBucket->pList, 1);
@@ -103,21 +109,21 @@ SearchResult stucHTableGet(
 		if (ppEntry) {
 			*ppEntry = pBucket->pList;
 		}
-		return STUC_SEARCH_ADDED;
+		return PIX_SEARCH_ADDED;
 	}
-	HTableEntryCore *pEntry = pBucket->pList;
+	PixuctHTableEntryCore *pEntry = pBucket->pList;
 	do {
 		if (fpCompareEntry(pEntry, pKeyData, pInitInfo)) {
 			if (ppEntry) {
 				*ppEntry = pEntry;
 			}
-			return STUC_SEARCH_FOUND;
+			return PIX_SEARCH_FOUND;
 		}
 		if (!pEntry->pNext) {
 			if (!addEntry ||
 				fpAddPredicate && !fpAddPredicate(pHandle->pUserData, pKeyData, pInitInfo)
 			) {
-				return STUC_SEARCH_NOT_FOUND;
+				return PIX_SEARCH_NOT_FOUND;
 			}
 			I32 linIdx =
 				pixalcLinAlloc(pHandle->allocHandles + alloc, (void **)&pEntry->pNext, 1);
@@ -125,26 +131,26 @@ SearchResult stucHTableGet(
 			if (ppEntry) {
 				*ppEntry = pEntry->pNext;
 			}
-			return STUC_SEARCH_ADDED;
+			return PIX_SEARCH_ADDED;
 		}
 		pEntry = pEntry->pNext;
 	} while(true);
 }
 
-STUC_FORCE_INLINE
-SearchResult stucHTableGetConst(
-	HTable *pHandle,
+PIX_FORCE_INLINE
+SearchResult pixuctHTableGetConst(
+	PixuctHTable *pHandle,
 	I32 alloc,
 	const void *pKeyData,
 	void **ppEntry,
 	bool addEntry,
 	const void *pInitInfo,
-	StucKey (* fpMakeKey)(const void *),
+	PixuctKey (* fpMakeKey)(const void *),
 	bool (* fpAddPredicate)(const void *, const void *, const void *),
-	void (* fpInitEntry)(void *, HTableEntryCore *, const void *, void *, I32),
-	bool (* fpCompareEntry)(const HTableEntryCore *, const void *, const void *)
+	void (* fpInitEntry)(void *, PixuctHTableEntryCore *, const void *, void *, I32),
+	bool (* fpCompareEntry)(const PixuctHTableEntryCore *, const void *, const void *)
 ) {
-	return stucHTableGet(
+	return pixuctHTableGet(
 		pHandle,
 		alloc,
 		pKeyData,
@@ -159,8 +165,8 @@ SearchResult stucHTableGetConst(
 }
 
 static inline
-bool stucHTableCmpFalse(
-	const HTableEntryCore *pEntry,
+bool pixuctHTableCmpFalse(
+	const PixuctHTableEntryCore *pEntry,
 	const void *pKeyData,
 	const void *pInitInfo
 ) {
@@ -168,17 +174,17 @@ bool stucHTableCmpFalse(
 }
 
 static inline
-StucKey stucKeyFromI32(const void *pKeyData) {
-	return (StucKey){.pKey = pKeyData, .size = sizeof(I32)};
+PixuctKey stucKeyFromI32(const void *pKeyData) {
+	return (PixuctKey){.pKey = pKeyData, .size = sizeof(I32)};
 }
 
 static inline
-StucKey stucKeyFromI64(const void *pKeyData) {
-	return (StucKey){.pKey = pKeyData, .size = sizeof(I64)};
+PixuctKey stucKeyFromI64(const void *pKeyData) {
+	return (PixuctKey){.pKey = pKeyData, .size = sizeof(I64)};
 }
 
 static inline
-StucKey stucKeyFromPath(const void *pKeyData) {
+PixuctKey stucKeyFromPath(const void *pKeyData) {
 	I32 len = strnlen(pKeyData, pixioPathMaxGet());
-	return (StucKey){.pKey = pKeyData, .size = len};
+	return (PixuctKey){.pKey = pKeyData, .size = len};
 }
