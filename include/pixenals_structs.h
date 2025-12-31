@@ -133,8 +133,46 @@ SearchResult pixuctHTableGet(
 			}
 			return PIX_SEARCH_ADDED;
 		}
-		pEntry = pEntry->pNext;
-	} while(true);
+	} while(pEntry = pEntry->pNext);
+	return PIX_SEARCH_NOT_FOUND;
+}
+
+PIX_FORCE_INLINE
+void pixuctHTableRemove(
+	PixuctHTable *pHandle,
+	I32 alloc,
+	const void *pKeyData,
+	PixuctKey (* fpMakeKey)(const void *),
+	bool (* fpCompareEntry)(const PixuctHTableEntryCore *, const void *, const void *),
+	void (* fpClearEntry)(void *, PixuctHTableEntryCore *, const void *)
+) {
+	PIX_ERR_ASSERT("", pHandle->pTable && pHandle->size);
+	PIX_ERR_ASSERT(
+		"",
+		alloc < PIX_HTABLE_ALLOC_HANDLES_MAX && pHandle->allocHandles[alloc].valid
+	);
+	PIX_ERR_ASSERT("", fpMakeKey && fpCompareEntry);
+	PixuctHTableBucket *pBucket = pixuctHTableBucketGet(pHandle, fpMakeKey(pKeyData));
+	PIX_ERR_ASSERT("unable to find specified entry", pBucket->pList)
+	PixuctHTableEntryCore *pEntry = pBucket->pList;
+	PixuctHTableEntryCore *pPrev = NULL;
+	do {
+		if (fpCompareEntry(pEntry, pKeyData, NULL)) {
+			break;
+		}
+		PIX_ERR_ASSERT("unable to find specified entry", !pEntry->pNext);
+	} while(pPrev = pEntry, pEntry = pEntry->pNext);
+	if (pPrev) {
+		pPrev->pNext = pEntry->pNext;
+	}
+	else {
+		pBucket->pList = pEntry->pNext;
+	}
+	pEntry->pNext = NULL;
+	if (fpClearEntry) {
+		fpClearEntry(pHandle->pUserData, pEntry, pKeyData);
+	}
+	pixalcLinAllocRegionClear(pHandle->allocHandles + alloc, pEntry, 1);
 }
 
 PIX_FORCE_INLINE
