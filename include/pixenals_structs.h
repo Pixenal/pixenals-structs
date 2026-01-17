@@ -223,6 +223,6 @@ PixuctKey stucKeyFromI64(const void *pKeyData) {
 
 static inline
 PixuctKey stucKeyFromPath(const void *pKeyData) {
-	I32 len = strnlen(pKeyData, pixioPathMaxGet());
+	I32 len = (I32)strnlen(pKeyData, pixioPathMaxGet());
 	return (PixuctKey){.pKey = pKeyData, .size = len};
 }
