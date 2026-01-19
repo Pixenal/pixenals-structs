@@ -96,7 +96,9 @@ SearchResult pixuctHTableGet(
 		alloc < PIX_HTABLE_ALLOC_HANDLES_MAX && pHandle->allocHandles[alloc].valid
 	);
 	PIX_ERR_ASSERT("", (!addEntry || fpInitEntry) && fpCompareEntry);
-	PixuctHTableBucket *pBucket = pixuctHTableBucketGet(pHandle, fpMakeKey(pKeyData));
+	PixuctKey key = fpMakeKey(pKeyData);
+	PIX_ERR_ASSERT("invalid key", key.size > 0);
+	PixuctHTableBucket *pBucket = pixuctHTableBucketGet(pHandle, key);
 	if (!pBucket->pList) {
 		if (!addEntry ||
 			fpAddPredicate && !fpAddPredicate(pHandle->pUserData, pKeyData, pInitInfo)
