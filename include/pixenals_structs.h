@@ -37,6 +37,7 @@ typedef struct PixuctHTableBucket {
 typedef struct PixuctHTable {
 	const PixalcFPtrs *pAlloc;
 	PixalcLinAlloc allocHandles[PIX_HTABLE_ALLOC_HANDLES_MAX];
+	PixalcLinAlloc *linAlc[PIX_HTABLE_ALLOC_HANDLES_MAX];
 	PixuctHTableBucket *pTable;
 	void *pUserData;
 	I32 size;
@@ -52,6 +53,11 @@ typedef enum SearchResult {
 	PIX_SEARCH_NOT_FOUND,
 	PIX_SEARCH_ADDED
 } SearchResult;
+
+typedef struct PixuctHTableMem {
+	PixalcLinAlloc pArr[PIX_HTABLE_ALLOC_HANDLES_MAX];
+	I32 count;
+} PixuctHTableMem;
 
 static inline
 U32 stucFnvHash(const U8 *value, I32 valueSize, U32 size) {
@@ -71,10 +77,18 @@ void pixuctHTableInit(
 	PixuctHTable *pHandle,
 	I32 targetSize,
 	PixtyI32Arr allocTypeSizes,
-	void *pUserData
+	PixuctHTableMem *pMem,
+	void *pUserData,
+	bool zeroOnClear
 );
 void pixuctHTableDestroy(PixuctHTable *pHandle);
-PixalcLinAlloc *pixuctHTableAllocGet(PixuctHTable *pHandle, I32 idx);
+
+static inline
+PixalcLinAlloc *pixuctHTableAllocGet(PixuctHTable *pHandle, I32 idx) {
+	PIX_ERR_ASSERT("", idx >= 0 && idx < PIX_HTABLE_ALLOC_HANDLES_MAX);
+	return pHandle->linAlc[idx];
+}
+
 const PixalcLinAlloc *pixuctHTableAllocGetConst(const PixuctHTable *pHandle, I32 idx);
 PixuctHTableBucket *pixuctHTableBucketGet(PixuctHTable *pHandle, PixuctKey key);
 PIX_FORCE_INLINE
@@ -93,7 +107,8 @@ SearchResult pixuctHTableGet(
 	PIX_ERR_ASSERT("", pHandle->pTable && pHandle->size);
 	PIX_ERR_ASSERT(
 		"",
-		alloc < PIX_HTABLE_ALLOC_HANDLES_MAX && pHandle->allocHandles[alloc].valid
+		alloc < PIX_HTABLE_ALLOC_HANDLES_MAX &&
+		pHandle->linAlc[alloc] && pHandle->linAlc[alloc]->valid
 	);
 	PIX_ERR_ASSERT("", (!addEntry || fpInitEntry) && fpCompareEntry);
 	PixuctKey key = fpMakeKey(pKeyData);
@@ -106,7 +121,7 @@ SearchResult pixuctHTableGet(
 			return PIX_SEARCH_NOT_FOUND;
 		}
 		I32 linIdx =
-			pixalcLinAlloc(pHandle->allocHandles + alloc, (void **)&pBucket->pList, 1);
+			pixalcLinAlloc(pHandle->linAlc[alloc], (void **)&pBucket->pList, 1);
 		fpInitEntry(pHandle->pUserData, pBucket->pList, pKeyData, pInitInfo, linIdx);
 		if (ppEntry) {
 			*ppEntry = pBucket->pList;
@@ -128,7 +143,7 @@ SearchResult pixuctHTableGet(
 				return PIX_SEARCH_NOT_FOUND;
 			}
 			I32 linIdx =
-				pixalcLinAlloc(pHandle->allocHandles + alloc, (void **)&pEntry->pNext, 1);
+				pixalcLinAlloc(pHandle->linAlc[alloc], (void **)&pEntry->pNext, 1);
 			fpInitEntry(pHandle->pUserData, pEntry->pNext, pKeyData, pInitInfo, linIdx);
 			if (ppEntry) {
 				*ppEntry = pEntry->pNext;
@@ -151,7 +166,8 @@ void pixuctHTableRemove(
 	PIX_ERR_ASSERT("", pHandle->pTable && pHandle->size);
 	PIX_ERR_ASSERT(
 		"",
-		alloc < PIX_HTABLE_ALLOC_HANDLES_MAX && pHandle->allocHandles[alloc].valid
+		alloc < PIX_HTABLE_ALLOC_HANDLES_MAX && 
+		pHandle->linAlc[alloc] && pHandle->linAlc[alloc]->valid
 	);
 	PIX_ERR_ASSERT("", fpMakeKey && fpCompareEntry);
 	PixuctHTableBucket *pBucket = pixuctHTableBucketGet(pHandle, fpMakeKey(pKeyData));
@@ -174,7 +190,7 @@ void pixuctHTableRemove(
 	if (fpClearEntry) {
 		fpClearEntry(pHandle->pUserData, pEntry, pKeyData);
 	}
-	pixalcLinAllocRegionClear(pHandle->allocHandles + alloc, pEntry, 1);
+	pixalcLinAllocRegionClear(pHandle->linAlc[alloc], pEntry, 1);
 }
 
 PIX_FORCE_INLINE
@@ -202,6 +218,16 @@ SearchResult pixuctHTableGetConst(
 		fpInitEntry,
 		fpCompareEntry
 	);
+}
+
+static inline
+void pixuctHTableMemDestroy(PixuctHTableMem *pMem) {
+	PIX_ERR_ASSERT("", pMem && pMem->count);
+	for (I32 i = 0; i < pMem->count; ++i) {
+		if (pMem->pArr[i].valid) {
+			pixalcLinAllocDestroy(pMem->pArr + i);
+		}
+	}
 }
 
 static inline
