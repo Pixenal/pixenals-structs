@@ -150,7 +150,7 @@ SearchResult pixuctHTableGet(
 			}
 			return PIX_SEARCH_ADDED;
 		}
-	} while(pEntry = pEntry->pNext);
+	} while((pEntry = pEntry->pNext));
 	return PIX_SEARCH_NOT_FOUND;
 }
 
@@ -247,10 +247,4 @@ PixuctKey stucKeyFromI32(const void *pKeyData) {
 static inline
 PixuctKey stucKeyFromI64(const void *pKeyData) {
 	return (PixuctKey){.pKey = pKeyData, .size = sizeof(I64)};
-}
-
-static inline
-PixuctKey stucKeyFromPath(const void *pKeyData) {
-	I32 len = (I32)strnlen(pKeyData, pixioPathMaxGet());
-	return (PixuctKey){.pKey = pKeyData, .size = len};
 }
