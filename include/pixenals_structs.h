@@ -240,11 +240,11 @@ bool pixuctHTableCmpFalse(
 }
 
 static inline
-PixuctKey stucKeyFromI32(const void *pKeyData) {
+PixuctKey pixuctKeyFromI32(const void *pKeyData) {
 	return (PixuctKey){.pKey = pKeyData, .size = sizeof(I32)};
 }
 
 static inline
-PixuctKey stucKeyFromI64(const void *pKeyData) {
+PixuctKey pixuctKeyFromI64(const void *pKeyData) {
 	return (PixuctKey){.pKey = pKeyData, .size = sizeof(I64)};
 }
