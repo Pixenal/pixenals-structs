@@ -101,6 +101,8 @@ SearchResult pixuctHTableGet(
 	void *pInitInfo,
 	PixuctKey (* fpMakeKey)(const void *),
 	bool (* fpAddPredicate)(const void *, const void *, const void *),
+	//  is a callback needed for this?
+	//v maybe just return the entry & the user can init with that v
 	void (* fpInitEntry)(void *, PixuctHTableEntryCore *, const void *, void *, I32),
 	bool (* fpCompareEntry)(const PixuctHTableEntryCore *, const void *, const void *)
 ) {
@@ -247,4 +249,138 @@ PixuctKey pixuctKeyFromI32(const void *pKeyData) {
 static inline
 PixuctKey pixuctKeyFromI64(const void *pKeyData) {
 	return (PixuctKey){.pKey = pKeyData, .size = sizeof(I64)};
+}
+
+#define PIXUCT_AVL_MAX_DEPTH 30
+
+typedef struct PixuctAvlNodeCore {
+	U64 field;//30-left, 30-right, 1-left-valid, 1-right-valid, 2-balance
+} PixuctAvlNodeCore;
+
+static inline
+PixtyValidIdx pixuctAvlChildGet(const PixuctAvlNodeCore *pNode, bool right) {
+	return (PixtyValidIdx){
+		.idx = (U32)(pNode->field >> (right ? 30 : 0)) & 0x3fffffffu,
+		.valid = (U32)(pNode->field >> (right ? 61 : 60)) & 0x1u
+	};
+}
+
+static inline
+void pixuctAvlChildSet(PixuctAvlNodeCore *pNode, I32 idx, bool right) {
+	PIX_ERR_ASSERT("", idx >= 0 && idx <= 0x3fffffff);
+	pNode->field |= (U64)idx << (right ? 30 : 0) | (U64)0x1u << (right ? 61 : 60);
+}
+
+static inline
+void pixuctAvlChildClear(PixuctAvlNodeCore *pNode, bool right) {
+	pNode->field &= ~((U64)0x1u << (right ? 61 : 60));
+}
+
+static inline
+I32 pixuctAvlBalanceGet(const PixuctAvlNodeCore *pNode) {
+	return ((I32)(pNode->field >> 62) & 0x3) - 1;
+}
+
+static inline
+void pixuctAvlBalanceSet(PixuctAvlNodeCore *pNode, I32 val) {
+	PIX_ERR_ASSERT("", val >= -1 && val <= 1);
+	pNode->field |= (U64)(val + 1) << 62;
+}
+
+typedef struct PixuctAvl {
+	PixalcLinAlloc alloc;
+	PixuctAvlNodeCore root;
+} PixuctAvl;
+
+static inline
+PixErr pixuctAvlInit(const PixalcFPtrs *pAlloc, PixuctAvl *pHandle, I32 structSize) {
+	PixErr err = PIX_ERR_SUCCESS;
+	*pHandle = (PixuctAvl){0};
+	pixalcLinAllocInit(pAlloc, &pHandle->alloc, structSize, 6, false);
+	return err;
+}
+
+//TODO use custom bitfield in node struct rather than builtin.
+// make get/set funcs to reduce repeated code
+static inline
+void pixuctAvlRotate(PixuctAvl *pHandle, I32 node, I32 parent, bool right) {
+	PixuctAvlNodeCore *pNode = pixalcLinAllocIdx(&pHandle->alloc, node);
+	PixuctAvlNodeCore *pParent = pixalcLinAllocIdx(&pHandle->alloc, parent);
+	bool rightOfParent = node == pixuctAvlChildGet(pParent, true).idx;
+	PIX_ERR_ASSERT("", rightOfParent || node == pixuctAvlChildGet(pParent, false).idx);
+	PixtyValidIdx childIdx = pixuctAvlChildGet(pNode, !right);
+	PIX_ERR_ASSERT("", childIdx.valid);
+	pixuctAvlChildSet(pParent, childIdx.idx, rightOfParent);
+	PixuctAvlNodeCore *pChild = pixalcLinAllocIdx(&pHandle->alloc, childIdx.idx);
+	PIX_ERR_ASSERT("", !pixuctAvlChildGet(pChild, right).valid);
+	pixuctAvlChildSet(pChild, node, right);
+	pixuctAvlChildClear(pNode, !right);
+}
+
+static inline
+PixuctAvlNodeCore *pixuctParentGet(
+	PixuctAvl *pHandle,
+	PixuctAvlNodeCore *pNode,
+	I32 stackPtr
+) {
+	PixErr err = PIX_ERR_SUCCESS;
+	if (stackPtr = 0) {
+		//TODO
+	}
+	return err;
+}
+
+PIX_FORCE_INLINE
+PixErr pixuctAvlAdd(
+	const PixuctAvl *pHandle,
+	void **ppNode,
+	I32 *pIdx,
+	const void *pKeyData,
+	bool (* fpCmp)(const PixuctAvlNodeCore *, const void *)
+) {
+	PixErr err = PIX_ERR_SUCCESS;
+	PixuctAvlNodeCore *pNew = NULL;
+	I32 newIdx = pixalcLinAlloc(&pHandle->alloc, &pNew, 1);
+	PixuctAvlNodeCore *pNode = &pHandle->root;
+	I32 stack[PIXUCT_AVL_MAX_DEPTH] = {0};
+	I32 stackPtr = 0;
+	while (true) {
+		bool right = fpCmp(pNode, pKeyData);
+		PixtyValidIdx childIdx = pixuctAvlChildGet(pNode, right);
+		if (!childIdx.valid) {
+			pixuctAvlChildSet(pNode, newIdx, right);
+			break;
+		}
+		pNode = pixalcLinAllocIdx(&pHandle->alloc, childIdx.idx);
+		++stackPtr;
+		PIX_ERR_ASSERT("", stackPtr < PIXUCT_AVL_MAX_DEPTH);
+	}
+	I32 runningBalance = 0;
+	PIX_ERR_ASSERT("", stackPtr > 0);
+	for (stackPtr - 1; stackPtr >= 0; --stackPtr) {
+		pNode = pixalcLinAllocIdx(&pHandle->alloc, stack[stackPtr]);
+		I32 balance = pixuctAvlBalanceGet(pNode);
+		if (!balance) {
+			break;
+		}
+		balance += runningBalance;
+		if (balance < -1 || balance > 1) {
+			PixuctAvlNodeCore *pParent = pixuctParentGet(pHandle, pNode, stackPtr);
+			bool rightRot = true;//TODO find if right or left rotation;
+			bool doubleRot = false;//TODO find if double rotation
+			pixuctAvlRotate(pHandle, pNode, pParent, rightRot);
+			if (doubleRot) {
+				pixuctAvlRotate(pHandle, pNode, pParent, !rightRot);
+			}
+			pixuctAvlBalanceSet(pNode, balance);
+		}
+		runningBalance += balance;
+	}
+	if (ppNode) {
+		*ppNode = pNew;
+	}
+	if (pIdx) {
+		*pIdx = newIdx;
+	}
+	return err;
 }
