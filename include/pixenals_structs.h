@@ -288,59 +288,74 @@ void pixuctAvlBalanceSet(PixuctAvlNodeCore *pNode, I32 val) {
 }
 
 typedef struct PixuctAvl {
-	PixalcLinAlloc alloc;
+	PixalcLinAlloc *pAlloc;
 	PixuctAvlNodeCore root;
+	I32 count;
 } PixuctAvl;
 
 static inline
-PixErr pixuctAvlInit(const PixalcFPtrs *pAlloc, PixuctAvl *pHandle, I32 structSize) {
+PixErr pixuctAvlInit(PixuctAvl *pHandle, PixalcLinAlloc *pMem) {
 	PixErr err = PIX_ERR_SUCCESS;
-	*pHandle = (PixuctAvl){0};
-	pixalcLinAllocInit(pAlloc, &pHandle->alloc, structSize, 6, false);
+	*pHandle = (PixuctAvl){.pAlloc = pMem};
+	//pixalcLinAllocInit(pAlloc, &pHandle->alloc, structSize, 6, false);
 	return err;
 }
 
 //TODO use custom bitfield in node struct rather than builtin.
 // make get/set funcs to reduce repeated code
 static inline
-void pixuctAvlRotate(PixuctAvl *pHandle, I32 node, I32 parent, bool right) {
-	PixuctAvlNodeCore *pNode = pixalcLinAllocIdx(&pHandle->alloc, node);
-	PixuctAvlNodeCore *pParent = pixalcLinAllocIdx(&pHandle->alloc, parent);
+void pixuctAvlRotate(
+	PixuctAvl *pHandle,
+	I32 node,
+	PixuctAvlNodeCore *pParent,
+	bool right
+) {
+	PixuctAvlNodeCore *pNode = pixalcLinAllocIdx(pHandle->pAlloc, node);
 	bool rightOfParent = node == pixuctAvlChildGet(pParent, true).idx;
 	PIX_ERR_ASSERT("", rightOfParent || node == pixuctAvlChildGet(pParent, false).idx);
 	PixtyValidIdx childIdx = pixuctAvlChildGet(pNode, !right);
 	PIX_ERR_ASSERT("", childIdx.valid);
 	pixuctAvlChildSet(pParent, childIdx.idx, rightOfParent);
-	PixuctAvlNodeCore *pChild = pixalcLinAllocIdx(&pHandle->alloc, childIdx.idx);
-	PIX_ERR_ASSERT("", !pixuctAvlChildGet(pChild, right).valid);
+	PixuctAvlNodeCore *pChild = pixalcLinAllocIdx(pHandle->pAlloc, childIdx.idx);
+	PixtyValidIdx subChild = pixuctAvlChildGet(pChild, right);
+	if (subChild.valid) {
+	}
+	else {
+		pixuctAvlChildClear(pNode, !right);
+		pixuctAvlChildSet(pNode, subChild.idx, !right);
+		I32 balance = pixuctAvlBalanceGet(pNode);
+		pixuctAvlBalanceSet(pNode, balance - (right ? 1 : -1));
+	}
 	pixuctAvlChildSet(pChild, node, right);
-	pixuctAvlChildClear(pNode, !right);
 }
 
 static inline
-PixuctAvlNodeCore *pixuctParentGet(
+PixuctAvlNodeCore *pixuctAvlParentGet(
 	PixuctAvl *pHandle,
 	PixuctAvlNodeCore *pNode,
+	I32 *pStack,
 	I32 stackPtr
 ) {
 	PixErr err = PIX_ERR_SUCCESS;
-	if (stackPtr = 0) {
-		//TODO
+	if (stackPtr > 0) {
+		return pixalcLinAllocIdx(pHandle->pAlloc, pStack[stackPtr - 1]);
 	}
-	return err;
+	else {
+		return &pHandle->root;
+	}
 }
 
 PIX_FORCE_INLINE
 PixErr pixuctAvlAdd(
-	const PixuctAvl *pHandle,
+	PixuctAvl *pHandle,
 	void **ppNode,
 	I32 *pIdx,
 	const void *pKeyData,
-	bool (* fpCmp)(const PixuctAvlNodeCore *, const void *)
+	bool (*fpCmp)(const PixuctAvlNodeCore *, const void *)
 ) {
 	PixErr err = PIX_ERR_SUCCESS;
 	PixuctAvlNodeCore *pNew = NULL;
-	I32 newIdx = pixalcLinAlloc(&pHandle->alloc, &pNew, 1);
+	I32 newIdx = pixalcLinAlloc(pHandle->pAlloc, &pNew, 1);
 	PixuctAvlNodeCore *pNode = &pHandle->root;
 	I32 stack[PIXUCT_AVL_MAX_DEPTH] = {0};
 	I32 stackPtr = 0;
@@ -351,36 +366,142 @@ PixErr pixuctAvlAdd(
 			pixuctAvlChildSet(pNode, newIdx, right);
 			break;
 		}
-		pNode = pixalcLinAllocIdx(&pHandle->alloc, childIdx.idx);
+		pNode = pixalcLinAllocIdx(pHandle->pAlloc, childIdx.idx);
+		stack[stackPtr] = childIdx.idx;
 		++stackPtr;
 		PIX_ERR_ASSERT("", stackPtr < PIXUCT_AVL_MAX_DEPTH);
 	}
-	I32 runningBalance = 0;
+	I32 balancePrev = 0;
 	PIX_ERR_ASSERT("", stackPtr > 0);
-	for (stackPtr - 1; stackPtr >= 0; --stackPtr) {
-		pNode = pixalcLinAllocIdx(&pHandle->alloc, stack[stackPtr]);
+	for (stackPtr -= 1; stackPtr >= 0; --stackPtr) {
+		pNode = pixalcLinAllocIdx(pHandle->pAlloc, stack[stackPtr]);
 		I32 balance = pixuctAvlBalanceGet(pNode);
 		if (!balance) {
 			break;
 		}
-		balance += runningBalance;
+		PixuctAvlNodeCore *pParent = pixuctAvlParentGet(pHandle, pNode, stack, stackPtr);
+		bool isRight = stack[stackPtr] == pixuctAvlChildGet(pParent, true).idx;
+		balance += (isRight ? 1 : -1);
 		if (balance < -1 || balance > 1) {
-			PixuctAvlNodeCore *pParent = pixuctParentGet(pHandle, pNode, stackPtr);
-			bool rightRot = true;//TODO find if right or left rotation;
-			bool doubleRot = false;//TODO find if double rotation
-			pixuctAvlRotate(pHandle, pNode, pParent, rightRot);
-			if (doubleRot) {
-				pixuctAvlRotate(pHandle, pNode, pParent, !rightRot);
+			PIX_ERR_ASSERT("", isRight == balance > 0);
+			pixuctAvlRotate(pHandle, stack[stackPtr], pParent, !isRight);
+			if (isRight != balancePrev > 0) {
+				//double rotation
+				PIX_ERR_ASSERT("", balancePrev);
+				pixuctAvlRotate(pHandle, stack[stackPtr], pParent, isRight);
 			}
-			pixuctAvlBalanceSet(pNode, balance);
+			pixuctAvlBalanceSet(pParent, 0);
+			break;
 		}
-		runningBalance += balance;
+		pixuctAvlBalanceSet(pNode, balance);
+		balancePrev = balance;
 	}
+	++pHandle->count;
 	if (ppNode) {
 		*ppNode = pNew;
 	}
 	if (pIdx) {
 		*pIdx = newIdx;
+	}
+	return err;
+}
+
+typedef struct PixuctAvlStackEntry {
+	I32 idx;
+	I32 nextChild;
+} PixuctAvlStackEntry;
+
+typedef struct PixuctAvlIter {
+	PixuctAvl *pHandle;
+	PixuctAvlStackEntry stack[PIXUCT_AVL_MAX_DEPTH];
+	I32 stackPtr;
+	I32 linIdx;
+} PixuctAvlIter;
+
+static inline
+PixErr pixuctAvlIterInit(PixuctAvl *pHandle, PixuctAvlIter *pIter) {
+	PixErr err = PIX_ERR_SUCCESS;
+	*pIter = (PixuctAvlIter){pHandle = pHandle};
+	return err;
+}
+
+static inline
+bool pixuctAvlIterAtEnd(const PixuctAvlIter *pIter) {
+	return pIter->linIdx < pIter->pHandle->count;
+}
+
+static inline
+void pixuctAvlIterInc(PixuctAvlIter *pIter) {
+	if (pixuctAvlIterAtEnd(pIter)) {
+		return;
+	}
+	do {
+		PIX_ERR_ASSERT(
+			"",
+			pIter->stackPtr >= 0 && pIter->stackPtr < PIXUCT_AVL_MAX_DEPTH
+		);
+		PixuctAvlStackEntry *pEntry = pIter->stack + pIter->stackPtr;
+		PixuctAvlNodeCore *pNode = pixalcLinAllocIdx(pIter->pHandle->pAlloc, pEntry->idx);
+		if (pEntry->nextChild < 2) {
+			PixtyValidIdx child = pixuctAvlChildGet(pNode, pEntry->nextChild);
+			++pEntry->nextChild;
+			if (!child.valid) {
+				continue;
+			}
+			++pIter->stackPtr;
+			pIter->stack[pIter->stackPtr] = (PixuctAvlStackEntry){.idx = child.idx};
+			break;
+		}
+		else {
+			--pIter->stackPtr;
+		}
+	} while(++pIter->linIdx, !pixuctAvlIterAtEnd(pIter));
+}
+
+static inline
+PixuctAvlNodeCore *pixuctAvlIterGetItem(PixuctAvlIter *pIter) {
+	PIX_ERR_ASSERT(
+		"",
+		pIter->stackPtr >= 0 && pIter->stackPtr < PIXUCT_AVL_MAX_DEPTH
+	);
+	return pixalcLinAllocIdx(pIter->pHandle->pAlloc, pIter->stack[pIter->stackPtr].idx);
+}
+
+PIX_FORCE_INLINE
+PixErr pixuctAvlGet(
+	PixuctAvl *pHandle,
+	PixuctAvlNodeCore **ppNode,
+	const void *pKeyData,
+	bool (*fpCmp)(const PixuctAvlNodeCore *, const void *),
+	bool (*fpCmpEql)(const PixuctAvlNodeCore *, const void *)
+) {
+	PixErr err = PIX_ERR_SUCCESS;
+	PixuctAvlNodeCore *pNode = &pHandle->root;
+	U32 rootValid = (U32)(pNode->field >> 60) & 0x3u;
+	if (!rootValid) {
+		//tree is empty
+		*ppNode = NULL;
+		return err;
+	}
+	//get first node (stored in root left child)
+	PIX_ERR_ASSERT("", rootValid == 0x1u);
+	pNode = pixalcLinAllocIdx(pHandle->pAlloc, pNode->field & 0x3fffffffu);
+	I32 depth = 0;
+	while (true) {
+		if (fpCmpEql(pNode, pKeyData)) {
+			*ppNode = pNode;
+			return err;
+		}
+		bool right = fpCmp(pNode, pKeyData);
+		PixtyValidIdx childIdx = pixuctAvlChildGet(pNode, right);
+		if (!childIdx.valid) {
+			//key isn't in tree
+			*ppNode = NULL;
+			return err;
+		}
+		pNode = pixalcLinAllocIdx(pHandle->pAlloc, childIdx.idx);
+		++depth;
+		PIX_ERR_ASSERT("", depth < PIXUCT_AVL_MAX_DEPTH);
 	}
 	return err;
 }
