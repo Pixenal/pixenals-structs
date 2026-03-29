@@ -197,27 +197,23 @@ void pixuctHTableRemove(
 
 PIX_FORCE_INLINE
 SearchResult pixuctHTableGetConst(
-	PixuctHTable *pHandle,
+	const PixuctHTable *pHandle,
 	I32 alloc,
 	const void *pKeyData,
-	void **ppEntry,
-	bool addEntry,
-	const void *pInitInfo,
+	const void **ppEntry,
 	PixuctKey (* fpMakeKey)(const void *),
-	bool (* fpAddPredicate)(const void *, const void *, const void *),
-	void (* fpInitEntry)(void *, PixuctHTableEntryCore *, const void *, void *, I32),
 	bool (* fpCompareEntry)(const PixuctHTableEntryCore *, const void *, const void *)
 ) {
 	return pixuctHTableGet(
-		pHandle,
+		(void *)pHandle,
 		alloc,
 		pKeyData,
-		ppEntry,
-		addEntry,
-		(void *)pInitInfo,
+		(void *)ppEntry,
+		false,
+		NULL,
 		fpMakeKey,
-		fpAddPredicate,
-		fpInitEntry,
+		NULL,
+		NULL,
 		fpCompareEntry
 	);
 }
