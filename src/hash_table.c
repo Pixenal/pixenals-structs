@@ -59,6 +59,7 @@ void pixuctHTableInit(
 	I32 size = getNearbyPrime(targetSize);
 	*pHandle = (PixuctHTable){
 		.pAlloc = pAlloc,
+		.pMem = pMem,
 		.pUserData = pUserData,
 		.size = size,
 		.pTable = pAlloc->fpCalloc(size, sizeof(PixuctHTableBucket))
@@ -80,11 +81,11 @@ void pixuctHTableInit(
 			"lin alloc handle vailidity mismatch",
 			!pMem || reuseMem == pMem->pArr[i].valid
 		);
-		pHandle->linAlc[i] = pMem ? pMem->pArr + i : pHandle->allocHandles + i;
+		pHandle->linAlc[i] = !!pMem;
 		if (!reuseMem) {
 			pixalcLinAllocInit(
 				pAlloc,
-				pHandle->linAlc[i],
+				pixuctHTableAllocGet(pHandle, i),
 				allocTypeSizes.pArr[i],
 				allocInitSize,
 				zeroOnClear
@@ -100,25 +101,21 @@ void pixuctHTableDestroy(PixuctHTable *pHandle) {
 	}
 	PIX_ERR_ASSERT(
 		"at least 1 lin alloc handle should have been initialized",
-		pHandle->linAlc[0]->valid
+		pixuctHTableAllocGet(pHandle, 0)->valid
 	);
 	for (I32 i = 0; i < PIX_HTABLE_ALLOC_HANDLES_MAX; ++i) {
-		if (pHandle->linAlc[i] && pHandle->linAlc[i]->valid) {
-			bool internal = pHandle->linAlc[i] == pHandle->allocHandles + i;
+		PixalcLinAlloc *pLinAlloc = pixuctHTableAllocGet(pHandle, i); 
+		if (pLinAlloc && pLinAlloc->valid) {
+			bool internal = pLinAlloc == pHandle->allocHandles + i;
 			if (internal) {
-				pixalcLinAllocDestroy(pHandle->linAlc[i]);
+				pixalcLinAllocDestroy(pLinAlloc);
 			}
 			else {
-				pixalcLinAllocClear(pHandle->linAlc[i]);
+				pixalcLinAllocClear(pLinAlloc);
 			}
 		}
 	}
 	*pHandle = (PixuctHTable) {0};
-}
-
-const PixalcLinAlloc *pixuctHTableAllocGetConst(const PixuctHTable *pHandle, I32 idx) {
-	PIX_ERR_ASSERT("", idx >= 0 && idx < PIX_HTABLE_ALLOC_HANDLES_MAX);
-	return pHandle->linAlc[idx];
 }
 
 PixuctHTableBucket *pixuctHTableBucketGet(PixuctHTable *pHandle, PixuctKey key) {
