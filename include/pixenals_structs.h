@@ -368,7 +368,7 @@ PixErr pixuctAvlAdd(
 	void **ppNode,
 	I32 *pIdx,
 	const void *pKeyData,
-	bool (*fpCmp)(const PixuctAvlNodeCore *, const void *)
+	I32 (*fpCmp)(const PixuctAvlNodeCore *, const void *)
 ) {
 	PixErr err = PIX_ERR_SUCCESS;
 	PixuctAvlNodeCore *pNew = NULL;
@@ -388,7 +388,9 @@ PixErr pixuctAvlAdd(
 		stack[stackPtr] = childIdx.idx;
 		++stackPtr;
 		PIX_ERR_ASSERT("", stackPtr < PIXUCT_AVL_MAX_DEPTH);
-		right = fpCmp(pNode, pKeyData);
+		I32 cmp = fpCmp(pNode, pKeyData);
+		PIX_ERR_RETURN_IFNOT_COND(err, cmp != 2, "key collision");
+		right = cmp;
 	} while(true);
 	I32 balancePrev = 0;
 	//PIX_ERR_ASSERT("", stackPtr > 0);
@@ -440,21 +442,24 @@ static inline
 PixErr pixuctAvlIterInit(PixuctAvl *pHandle, PixuctAvlIter *pIter) {
 	PixErr err = PIX_ERR_SUCCESS;
 	*pIter = (PixuctAvlIter){pHandle = pHandle};
+	{
+		PixtyValidIdx startIdx = pixuctAvlChildGet(&pHandle->root, true);
+		PIX_ERR_RETURN_IFNOT_COND(err, startIdx.valid, "");
+		pIter->stack[0].idx = startIdx.idx;
+	}
 	do {
-		PIX_ERR_ASSERT(
-			"",
-			pIter->stackPtr >= 0 && pIter->stackPtr < PIXUCT_AVL_MAX_DEPTH
-		);
+		PIX_ERR_ASSERT("", pIter->stackPtr >= 0);
+		PIX_ERR_RETURN_IFNOT_COND(err, pIter->stackPtr < PIXUCT_AVL_MAX_DEPTH, "");
 		PixuctAvlStackEntry *pEntry = pIter->stack + pIter->stackPtr;
 		PixuctAvlNodeCore *pNode = pixalcLinAllocIdx(pIter->pHandle->pAlloc, pEntry->idx);
-		PixtyValidIdx child = pixuctAvlChildGet(pNode, pEntry->nextChild);
+		PixtyValidIdx child = pixuctAvlChildGet(pNode, !pEntry->nextChild);
 		++pEntry->nextChild;
 		if (!child.valid) {
 			break;
 		}
 		++pIter->stackPtr;
 		pIter->stack[pIter->stackPtr] = (PixuctAvlStackEntry){.idx = child.idx};
-	} while(++pIter->linIdx, !pixuctAvlIterAtEnd(pIter));
+	} while(true);
 	return err;
 }
 
@@ -468,6 +473,7 @@ void pixuctAvlIterInc(PixuctAvlIter *pIter) {
 	if (pixuctAvlIterAtEnd(pIter)) {
 		return;
 	}
+	I32 start = pIter->stack[pIter->stackPtr].idx;
 	do {
 		PIX_ERR_ASSERT(
 			"",
@@ -476,19 +482,34 @@ void pixuctAvlIterInc(PixuctAvlIter *pIter) {
 		PixuctAvlStackEntry *pEntry = pIter->stack + pIter->stackPtr;
 		PixuctAvlNodeCore *pNode = pixalcLinAllocIdx(pIter->pHandle->pAlloc, pEntry->idx);
 		if (pEntry->nextChild < 2) {
-			PixtyValidIdx child = pixuctAvlChildGet(pNode, pEntry->nextChild);
+			PixtyValidIdx child = pixuctAvlChildGet(pNode, !pEntry->nextChild);
 			++pEntry->nextChild;
 			if (!child.valid) {
-				continue;
+				if (pEntry->idx == start) {
+					continue;
+				}
+				else {
+					break;
+				}
 			}
 			++pIter->stackPtr;
 			pIter->stack[pIter->stackPtr] = (PixuctAvlStackEntry){.idx = child.idx};
-			break;
 		}
 		else {
+			if (!pIter->stackPtr) {
+				break;
+			}
 			--pIter->stackPtr;
+			PixuctAvlNodeCore *pParent = pixalcLinAllocIdx(
+				pIter->pHandle->pAlloc,
+				pIter->stack[pIter->stackPtr].idx
+			);
+			if (pixuctAvlIsChildRight(pParent, pEntry->idx)) {
+				break;
+			}
 		}
-	} while(++pIter->linIdx, !pixuctAvlIterAtEnd(pIter));
+	} while(pIter->stackPtr >= 0);
+	++pIter->linIdx;
 }
 
 static inline
@@ -505,27 +526,30 @@ PixErr pixuctAvlGet(
 	PixuctAvl *pHandle,
 	PixuctAvlNodeCore **ppNode,
 	const void *pKeyData,
-	bool (*fpCmp)(const PixuctAvlNodeCore *, const void *),
-	bool (*fpCmpEql)(const PixuctAvlNodeCore *, const void *)
+	I32 (*fpCmp)(const PixuctAvlNodeCore *, const void *)
 ) {
 	PixErr err = PIX_ERR_SUCCESS;
 	PixuctAvlNodeCore *pNode = &pHandle->root;
-	U32 rootValid = (U32)(pNode->field >> 60) & 0x3u;
+	U32 rootValid = (U32)(pNode->field >> 61) & 0x1u;
 	if (!rootValid) {
 		//tree is empty
 		*ppNode = NULL;
 		return err;
 	}
-	//get first node (stored in root left child)
+	//get first node (stored in root right child)
 	PIX_ERR_ASSERT("", rootValid == 0x1u);
 	pNode = pixalcLinAllocIdx(pHandle->pAlloc, pNode->field & 0x3fffffffu);
 	I32 depth = 0;
 	while (true) {
-		if (fpCmpEql(pNode, pKeyData)) {
-			*ppNode = pNode;
-			return err;
+		bool right;
+		{
+			I32 cmp = fpCmp(pNode, pKeyData);
+			if (cmp == 2) {
+				*ppNode = pNode;
+				return err;
+			}
+			right = cmp;
 		}
-		bool right = fpCmp(pNode, pKeyData);
 		PixtyValidIdx childIdx = pixuctAvlChildGet(pNode, right);
 		if (!childIdx.valid) {
 			//key isn't in tree
