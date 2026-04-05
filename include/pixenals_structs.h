@@ -316,8 +316,6 @@ bool pixuctAvlIsChildRight(PixuctAvlNodeCore *pParent, I32 node) {
 	return idx.valid && node == idx.idx;
 }
 
-//TODO use custom bitfield in node struct rather than builtin.
-// make get/set funcs to reduce repeated code
 static inline
 void pixuctAvlRotate(
 	PixuctAvl *pHandle,
@@ -347,6 +345,35 @@ void pixuctAvlRotate(
 }
 
 static inline
+void pixuctAvlRotateDouble(
+	PixuctAvl *pHandle,
+	I32 node,
+	PixuctAvlNodeCore *pParent,
+	bool right
+) {
+	PixuctAvlNodeCore *pNode = pixalcLinAllocIdx(pHandle->pAlloc, node);
+	PixtyValidIdx child = pixuctAvlChildGet(pNode, !right);
+	PIX_ERR_ASSERT("", child.valid);
+	PixuctAvlNodeCore *pChild = pixalcLinAllocIdx(pHandle->pAlloc, child.idx);
+	PixtyValidIdx subChild = pixuctAvlChildGet(pChild, right);
+	PIX_ERR_ASSERT("", subChild.valid);
+	PixuctAvlNodeCore *pSubChild = pixalcLinAllocIdx(pHandle->pAlloc, subChild.idx);
+
+	pixuctAvlChildSet(pNode, subChild.idx, !right);
+	subChild = pixuctAvlChildGet(pSubChild, !right);
+	if (subChild.valid) {
+		pixuctAvlChildSet(pChild, subChild.idx, right);
+	}
+	else {
+		pixuctAvlChildClear(pChild, right);
+	}
+	pixuctAvlChildSet(pSubChild, child.idx, !right);
+	pixuctAvlBalanceSet(pChild, 0);
+
+	pixuctAvlRotate(pHandle, node, pParent, right);
+}
+
+static inline
 PixuctAvlNodeCore *pixuctAvlParentGet(
 	PixuctAvl *pHandle,
 	PixuctAvlNodeCore *pNode,
@@ -373,6 +400,7 @@ PixErr pixuctAvlAdd(
 	PixErr err = PIX_ERR_SUCCESS;
 	PixuctAvlNodeCore *pNew = NULL;
 	I32 newIdx = pixalcLinAlloc(pHandle->pAlloc, &pNew, 1);
+	*pNew = (PixuctAvlNodeCore){0};
 	PixuctAvlNodeCore *pNode = &pHandle->root;
 	I32 stack[PIXUCT_AVL_MAX_DEPTH] = {0};
 	I32 stackPtr = 0;
@@ -405,11 +433,13 @@ PixErr pixuctAvlAdd(
 		}
 		if (balance < -1 || balance > 1) {
 			PixuctAvlNodeCore *pParent = pixuctAvlParentGet(pHandle, pNode, stack, stackPtr);
-			pixuctAvlRotate(pHandle, stack[stackPtr], pParent, !isRight);
 			if (isRight != balancePrev > 0) {
 				//double rotation
 				PIX_ERR_ASSERT("", balancePrev);
-				pixuctAvlRotate(pHandle, stack[stackPtr], pParent, isRight);
+				pixuctAvlRotateDouble(pHandle, stack[stackPtr], pParent, !isRight);
+			}
+			else {
+				pixuctAvlRotate(pHandle, stack[stackPtr], pParent, !isRight);
 			}
 			break;
 		}
@@ -538,7 +568,7 @@ PixErr pixuctAvlGet(
 	}
 	//get first node (stored in root right child)
 	PIX_ERR_ASSERT("", rootValid == 0x1u);
-	pNode = pixalcLinAllocIdx(pHandle->pAlloc, pNode->field & 0x3fffffffu);
+	pNode = pixalcLinAllocIdx(pHandle->pAlloc, pNode->field >> 30 & 0x3fffffffu);
 	I32 depth = 0;
 	while (true) {
 		bool right;
@@ -561,4 +591,15 @@ PixErr pixuctAvlGet(
 		PIX_ERR_ASSERT("", depth < PIXUCT_AVL_MAX_DEPTH);
 	}
 	return err;
+}
+
+static inline
+void pixuctAvlClear(PixuctAvl *pHandle) {
+	PIX_ERR_ASSERT(
+		"",
+		pHandle->count &&
+		pHandle->root.field &&
+		pHandle->pAlloc && pHandle->pAlloc->valid
+	);
+	*pHandle = (PixuctAvl){.pAlloc = pHandle->pAlloc};
 }
