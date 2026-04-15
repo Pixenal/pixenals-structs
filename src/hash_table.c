@@ -62,24 +62,31 @@ void pixuctHTableInit(
 		.pMem = pMem,
 		.pUserData = pUserData,
 		.size = size,
-		.pTable = pAlloc->fpCalloc(size, sizeof(PixuctHTableBucket))
 	};
-	bool reuseMem = pMem && pMem->pArr[0].valid;
+	if (pMem) {
+		PIXALC_DYN_ARR_RESIZE(PixuctHTableBucket, pAlloc, &pMem->buckets, size);
+		memset(pMem->buckets.pArr, 0, sizeof(PixuctHTableBucket) * size);
+		pHandle->pTable = pMem->buckets.pArr;
+	}
+	else {
+		pHandle->pTable = pAlloc->fpCalloc(size, sizeof(PixuctHTableBucket));
+	}
+	bool reuseMem = pMem && pMem->entries.pArr[0].valid;
 	PIX_ERR_ASSERT(
 		"",
 		allocTypeSizes.count && (!pMem || !reuseMem) ||
-		reuseMem && (!allocTypeSizes.count || pMem->count == allocTypeSizes.count)
+		reuseMem && (!allocTypeSizes.count || pMem->entries.count == allocTypeSizes.count)
 	);
-	I32 alcCount = reuseMem ? pMem->count : allocTypeSizes.count;
+	I32 alcCount = reuseMem ? pMem->entries.count : allocTypeSizes.count;
 	PIX_ERR_ASSERT("", alcCount > 0 && alcCount <= PIX_HTABLE_ALLOC_HANDLES_MAX);
 	if (!reuseMem && pMem) {
-		pMem->count = alcCount;
+		pMem->entries.count = alcCount;
 	}
 	I32 allocInitSize = size / alcCount / 2 + 1;
 	for (I32 i = 0; i < alcCount; ++i) {
 		PIX_ERR_ASSERT(
 			"lin alloc handle vailidity mismatch",
-			!pMem || reuseMem == pMem->pArr[i].valid
+			!pMem || reuseMem == pMem->entries.pArr[i].valid
 		);
 		pHandle->linAlc[i] = !!pMem;
 		if (!reuseMem) {
@@ -95,7 +102,7 @@ void pixuctHTableInit(
 }
 
 void pixuctHTableDestroy(PixuctHTable *pHandle) {
-	if (pHandle->pTable) {
+	if (!pHandle->pMem && pHandle->pTable) {
 		PIX_ERR_ASSERT("", pHandle->size);
 		pHandle->pAlloc->fpFree(pHandle->pTable);
 	}
