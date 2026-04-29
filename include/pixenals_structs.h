@@ -10,10 +10,14 @@ SPDX-License-Identifier: Apache-2.0
 #include "../../pixenals-error-utils/include/pixenals_error_utils.h"
 
 #ifndef PIX_FORCE_INLINE
+#ifdef NDEBUG
 #ifdef WIN32
 #define PIX_FORCE_INLINE __forceinline
 #else
 #define PIX_FORCE_INLINE __attribute__((always_inline)) static inline
+#endif
+#else
+#define PIX_FORCE_INLINE static inline
 #endif
 #endif
 
