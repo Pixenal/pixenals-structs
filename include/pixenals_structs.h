@@ -411,7 +411,6 @@ PixuctAvlNodeCore *pixuctAvlParentGet(
 	I32 *pStack,
 	I32 stackPtr
 ) {
-	PixErr err = PIX_ERR_SUCCESS;
 	if (stackPtr > 0) {
 		return pixalcLinAllocIdx(pHandle->pAlloc, pStack[stackPtr - 1]);
 	}
@@ -430,7 +429,7 @@ PixErr pixuctAvlAdd(
 ) {
 	PixErr err = PIX_ERR_SUCCESS;
 	PixuctAvlNodeCore *pNew = NULL;
-	I32 newIdx = pixalcLinAlloc(pHandle->pAlloc, &pNew, 1);
+	I32 newIdx = pixalcLinAlloc(pHandle->pAlloc, (void **)&pNew, 1);
 	*pNew = (PixuctAvlNodeCore){0};
 	PixuctAvlNodeCore *pNode = &pHandle->root;
 	I32 stack[PIXUCT_AVL_MAX_DEPTH] = {0};
