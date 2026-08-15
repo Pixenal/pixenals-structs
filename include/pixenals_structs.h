@@ -75,6 +75,12 @@ typedef enum SearchResult {
 	PIX_SEARCH_ADDED
 } SearchResult;
 
+typedef enum PixuctCmp {
+	PIX_CMP_LESS,
+	PIX_CMP_GREAT,
+	PIX_CMP_EQUAL
+} PixuctCmp;
+
 static inline
 U32 stucFnvHash(const U8 *value, I32 valueSize, U32 size) {
 	PIX_ERR_ASSERT("", value && valueSize > 0 && size > 0);
@@ -425,7 +431,7 @@ PixErr pixuctAvlAdd(
 	void **ppNode,
 	I32 *pIdx,
 	const void *pKeyData,
-	I32 (*fpCmp)(const PixuctAvlNodeCore *, const void *)
+	PixuctCmp (*fpCmp)(const PixuctAvlNodeCore *, const void *)
 ) {
 	PixErr err = PIX_ERR_SUCCESS;
 	PixuctAvlNodeCore *pNew = NULL;
@@ -446,8 +452,8 @@ PixErr pixuctAvlAdd(
 		stack[stackPtr] = childIdx.idx;
 		++stackPtr;
 		PIX_ERR_ASSERT("", stackPtr < PIXUCT_AVL_MAX_DEPTH);
-		I32 cmp = fpCmp(pNode, pKeyData);
-		PIX_ERR_RETURN_IFNOT_COND(err, cmp != 2, "key collision");
+		PixuctCmp cmp = fpCmp(pNode, pKeyData);
+		PIX_ERR_RETURN_IFNOT_COND(err, cmp != PIX_CMP_EQUAL, "key collision");
 		right = cmp;
 	} while(true);
 	I32 balancePrev = 0;
@@ -586,7 +592,7 @@ PixErr pixuctAvlGet(
 	PixuctAvl *pHandle,
 	PixuctAvlNodeCore **ppNode,
 	const void *pKeyData,
-	I32 (*fpCmp)(const PixuctAvlNodeCore *, const void *)
+	PixuctCmp (*fpCmp)(const PixuctAvlNodeCore *, const void *)
 ) {
 	PixErr err = PIX_ERR_SUCCESS;
 	PixuctAvlNodeCore *pNode = &pHandle->root;
@@ -603,8 +609,8 @@ PixErr pixuctAvlGet(
 	while (true) {
 		bool right;
 		{
-			I32 cmp = fpCmp(pNode, pKeyData);
-			if (cmp == 2) {
+			PixuctCmp cmp = fpCmp(pNode, pKeyData);
+			if (cmp == PIX_CMP_EQUAL) {
 				*ppNode = pNode;
 				return err;
 			}
@@ -621,6 +627,17 @@ PixErr pixuctAvlGet(
 		PIX_ERR_ASSERT("", depth < PIXUCT_AVL_MAX_DEPTH);
 	}
 	return err;
+}
+
+PIX_FORCE_INLINE
+PixErr pixuctAvlGetConst(
+	const PixuctAvl *pHandle,
+	const PixuctAvlNodeCore **ppNode,
+	const void *pKeyData,
+	PixuctCmp (*fpCmp)(const PixuctAvlNodeCore *, const void *)
+) {
+	return
+		pixuctAvlGet((PixuctAvl *)pHandle, (PixuctAvlNodeCore **)ppNode, pKeyData, fpCmp);
 }
 
 static inline
