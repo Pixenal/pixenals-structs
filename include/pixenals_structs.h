@@ -21,6 +21,9 @@ SPDX-License-Identifier: Apache-2.0
 #endif
 #endif
 
+#define PIX_HTABLE_ALLOC_HANDLES_MAX 2
+#define PIXUCT_AVL_MAX_DEPTH 30
+
 typedef int32_t I32;
 typedef int64_t I64;
 typedef uint8_t U8;
@@ -35,9 +38,6 @@ typedef struct PixuctHTableEntryCore {
 typedef struct PixuctHTableBucket {
 	PixuctHTableEntryCore *pList;
 } PixuctHTableBucket;
-
-#define PIX_HTABLE_ALLOC_HANDLES_MAX 2
-
 
 typedef struct PixuctHTableMemBuckets {
 	PixuctHTableBucket *pArr;
@@ -81,6 +81,43 @@ typedef enum PixuctCmp {
 	PIX_CMP_EQUAL
 } PixuctCmp;
 
+typedef struct PixuctAvlNodeCore {
+	U64 field;//30-left, 30-right, 1-left-valid, 1-right-valid, 2-balance
+} PixuctAvlNodeCore;
+
+typedef struct PixuctAvl {
+	PixalcLinAlloc *pAlloc;
+	PixuctAvlNodeCore root;
+	I32 count;
+} PixuctAvl;
+
+typedef struct PixuctAvlStackEntry {
+	I32 idx;
+	I32 nextChild;
+} PixuctAvlStackEntry;
+
+typedef struct PixuctAvlIter {
+	PixuctAvl *pHandle;
+	PixuctAvlStackEntry stack[PIXUCT_AVL_MAX_DEPTH];
+	I32 stackPtr;
+	I32 linIdx;
+	bool isConst;
+} PixuctAvlIter;
+
+#ifndef __cplusplus
+void pixuctHTableInit(
+	const PixalcFPtrs *pAlloc,
+	PixuctHTable *pHandle,
+	I32 targetSize,
+	PixtyI32Arr allocTypeSizes,
+	PixuctHTableMem *pMem,
+	void *pUserData,
+	bool zeroOnClear
+);
+void pixuctHTableDestroy(PixuctHTable *pHandle);
+const PixalcLinAlloc *pixuctHTableAllocGetConst(const PixuctHTable *pHandle, I32 idx);
+PixuctHTableBucket *pixuctHTableBucketGet(PixuctHTable *pHandle, PixuctKey key);
+
 static inline
 U32 stucFnvHash(const U8 *value, I32 valueSize, U32 size) {
 	PIX_ERR_ASSERT("", value && valueSize > 0 && size > 0);
@@ -106,19 +143,6 @@ const PixalcLinAlloc *pixuctHTableAllocGetConst(const PixuctHTable *pHandle, int
 	return pHandle->linAlc[idx] ? pHandle->pMem->entries.pArr + idx : pHandle->allocHandles + idx;
 }
 
-void pixuctHTableInit(
-	const PixalcFPtrs *pAlloc,
-	PixuctHTable *pHandle,
-	I32 targetSize,
-	PixtyI32Arr allocTypeSizes,
-	PixuctHTableMem *pMem,
-	void *pUserData,
-	bool zeroOnClear
-);
-void pixuctHTableDestroy(PixuctHTable *pHandle);
-
-const PixalcLinAlloc *pixuctHTableAllocGetConst(const PixuctHTable *pHandle, I32 idx);
-PixuctHTableBucket *pixuctHTableBucketGet(PixuctHTable *pHandle, PixuctKey key);
 PIX_FORCE_INLINE
 SearchResult pixuctHTableGet(
 	PixuctHTable *pHandle,
@@ -292,12 +316,6 @@ PixuctKey pixuctKeyFromI64(const void *pKeyData) {
 	return (PixuctKey){.pKey = pKeyData, .size = sizeof(I64)};
 }
 
-#define PIXUCT_AVL_MAX_DEPTH 30
-
-typedef struct PixuctAvlNodeCore {
-	U64 field;//30-left, 30-right, 1-left-valid, 1-right-valid, 2-balance
-} PixuctAvlNodeCore;
-
 static inline
 PixtyValidIdx pixuctAvlChildGet(const PixuctAvlNodeCore *pNode, bool right) {
 	return (PixtyValidIdx){
@@ -332,12 +350,6 @@ void pixuctAvlBalanceSet(PixuctAvlNodeCore *pNode, I32 val) {
 	pNode->field &= ~((U64)0x3u << 62);
 	pNode->field |= (U64)(val ? val == 1 ? 1 : 2 : 0) << 62;
 }
-
-typedef struct PixuctAvl {
-	PixalcLinAlloc *pAlloc;
-	PixuctAvlNodeCore root;
-	I32 count;
-} PixuctAvl;
 
 static inline
 PixErr pixuctAvlInit(PixuctAvl *pHandle, PixalcLinAlloc *pMem) {
@@ -492,18 +504,6 @@ PixErr pixuctAvlAdd(
 	return err;
 }
 
-typedef struct PixuctAvlStackEntry {
-	I32 idx;
-	I32 nextChild;
-} PixuctAvlStackEntry;
-
-typedef struct PixuctAvlIter {
-	PixuctAvl *pHandle;
-	PixuctAvlStackEntry stack[PIXUCT_AVL_MAX_DEPTH];
-	I32 stackPtr;
-	I32 linIdx;
-} PixuctAvlIter;
-
 static inline
 PixErr pixuctAvlIterInit(PixuctAvl *pHandle, PixuctAvlIter *pIter) {
 	PixErr err = PIX_ERR_SUCCESS;
@@ -526,6 +526,15 @@ PixErr pixuctAvlIterInit(PixuctAvl *pHandle, PixuctAvlIter *pIter) {
 		++pIter->stackPtr;
 		pIter->stack[pIter->stackPtr] = (PixuctAvlStackEntry){.idx = child.idx};
 	} while(true);
+	return err;
+}
+
+static inline
+PixErr pixuctAvlIterInitConst(const PixuctAvl *pHandle, PixuctAvlIter *pIter) {
+	PixErr err = PIX_ERR_SUCCESS;
+	err = pixuctAvlIterInit((PixuctAvl *)pHandle, pIter);
+	PIX_ERR_RETURN_IFNOT(err, "");
+	pIter->isConst = true;
 	return err;
 }
 
@@ -580,6 +589,16 @@ void pixuctAvlIterInc(PixuctAvlIter *pIter) {
 
 static inline
 PixuctAvlNodeCore *pixuctAvlIterGetItem(PixuctAvlIter *pIter) {
+	PIX_ERR_ASSERT("iter was initialised as const", !pIter->isConst);
+	PIX_ERR_ASSERT(
+		"",
+		pIter->stackPtr >= 0 && pIter->stackPtr < PIXUCT_AVL_MAX_DEPTH
+	);
+	return pixalcLinAllocIdx(pIter->pHandle->pAlloc, pIter->stack[pIter->stackPtr].idx);
+}
+
+static inline
+const PixuctAvlNodeCore *pixuctAvlIterGetItemConst(PixuctAvlIter *pIter) {
 	PIX_ERR_ASSERT(
 		"",
 		pIter->stackPtr >= 0 && pIter->stackPtr < PIXUCT_AVL_MAX_DEPTH
@@ -650,3 +669,4 @@ void pixuctAvlClear(PixuctAvl *pHandle) {
 	);
 	*pHandle = (PixuctAvl){.pAlloc = pHandle->pAlloc};
 }
+#endif
