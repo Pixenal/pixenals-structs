@@ -72,6 +72,7 @@ void pixuctHTableInit(
 		pHandle->pTable = pAlloc->fpCalloc(size, sizeof(PixuctHTableBucket));
 	}
 	bool reuseMem = pMem && pMem->entries.pArr[0].valid;
+	//TODO vv  the user doesn't know whether to set size, count, or both for allocTypeSizes  vv
 	PIX_ERR_ASSERT(
 		"",
 		allocTypeSizes.count && (!pMem || !reuseMem) ||

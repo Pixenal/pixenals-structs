@@ -69,6 +69,7 @@ typedef struct PixuctKey {
 	I32 size;
 } PixuctKey;
 
+//TODO prefix with 'Pixuct'
 typedef enum SearchResult {
 	PIX_SEARCH_FOUND,
 	PIX_SEARCH_NOT_FOUND,
@@ -144,6 +145,31 @@ const PixalcLinAlloc *pixuctHTableAllocGetConst(const PixuctHTable *pHandle, int
 }
 
 PIX_FORCE_INLINE
+void pixuctHTableEntryAdd(
+	PixalcLinAlloc *pLinAlloc,
+	void *pUserData,
+	PixuctHTableEntryCore **ppRef,
+	const void *pKeyData,
+	void **ppEntry,
+	void *pInitInfo,
+	I32 *pLinIdx,
+	void (* fpInitEntry)(void *, PixuctHTableEntryCore *, const void *, void *, I32)
+) {
+	I32 linIdx = pixalcLinAlloc(pLinAlloc, (void **)ppRef, 1);
+	if (pLinIdx) {
+		*pLinIdx = linIdx;
+	}
+	**ppRef = (PixuctHTableEntryCore){0};
+	if (fpInitEntry) {
+		fpInitEntry(pUserData, *ppRef, pKeyData, pInitInfo, linIdx);
+	}
+	PIX_ERR_ASSERT("", *ppRef);
+	if (ppEntry) {
+		*ppEntry = *ppRef;
+	}
+}
+
+PIX_FORCE_INLINE
 SearchResult pixuctHTableGet(
 	PixuctHTable *pHandle,
 	I32 alloc,
@@ -151,12 +177,11 @@ SearchResult pixuctHTableGet(
 	void **ppEntry,
 	bool addEntry,
 	void *pInitInfo,
+	I32 *pLinIdx,
 	PixuctKey (* fpMakeKey)(const void *),
 	bool (* fpAddPredicate)(const void *, const void *, const void *),
-	//  is a callback needed for this?
-	//v maybe just return the entry & the user can init with that v
 	void (* fpInitEntry)(void *, PixuctHTableEntryCore *, const void *, void *, I32),
-	bool (* fpCompareEntry)(const PixuctHTableEntryCore *, const void *, const void *)
+	bool (* fpCmpEntry)(const PixuctHTableEntryCore *, const void *, const void *)
 ) {
 	PIX_ERR_ASSERT("", pHandle->pTable && pHandle->size);
 	PixalcLinAlloc *pLinAlloc = pixuctHTableAllocGet(pHandle, alloc);
@@ -164,7 +189,7 @@ SearchResult pixuctHTableGet(
 		"",
 		alloc < PIX_HTABLE_ALLOC_HANDLES_MAX && pLinAlloc && pLinAlloc->valid
 	);
-	PIX_ERR_ASSERT("", (!addEntry || fpInitEntry) && fpCompareEntry);
+	PIX_ERR_ASSERT("", fpCmpEntry);
 	PixuctKey key = fpMakeKey(pKeyData);
 	PIX_ERR_ASSERT("invalid key", key.size > 0);
 	PixuctHTableBucket *pBucket = pixuctHTableBucketGet(pHandle, key);
@@ -174,18 +199,21 @@ SearchResult pixuctHTableGet(
 		) {
 			return PIX_SEARCH_NOT_FOUND;
 		}
-		I32 linIdx = pixalcLinAlloc(pLinAlloc, (void **)&pBucket->pList, 1);
-		*pBucket->pList = (PixuctHTableEntryCore){0};
-		fpInitEntry(pHandle->pUserData, pBucket->pList, pKeyData, pInitInfo, linIdx);
-		PIX_ERR_ASSERT("", pBucket->pList);
-		if (ppEntry) {
-			*ppEntry = pBucket->pList;
-		}
+		pixuctHTableEntryAdd(
+			pLinAlloc,
+			pHandle->pUserData,
+			&pBucket->pList,
+			pKeyData,
+			ppEntry,
+			pInitInfo,
+			pLinIdx,
+			fpInitEntry
+		);
 		return PIX_SEARCH_ADDED;
 	}
 	PixuctHTableEntryCore *pEntry = pBucket->pList;
 	do {
-		if (fpCompareEntry(pEntry, pKeyData, pInitInfo)) {
+		if (fpCmpEntry(pEntry, pKeyData, pInitInfo)) {
 			PIX_ERR_ASSERT("", pEntry);
 			if (ppEntry) {
 				*ppEntry = pEntry;
@@ -198,13 +226,16 @@ SearchResult pixuctHTableGet(
 			) {
 				return PIX_SEARCH_NOT_FOUND;
 			}
-			I32 linIdx = pixalcLinAlloc(pLinAlloc, (void **)&pEntry->pNext, 1);
-			*pEntry->pNext = (PixuctHTableEntryCore){0};
-			fpInitEntry(pHandle->pUserData, pEntry->pNext, pKeyData, pInitInfo, linIdx);
-			PIX_ERR_ASSERT("", pEntry->pNext);
-			if (ppEntry) {
-				*ppEntry = pEntry->pNext;
-			}
+			pixuctHTableEntryAdd(
+				pLinAlloc,
+				pHandle->pUserData,
+				&pEntry->pNext,
+				pKeyData,
+				ppEntry,
+				pInitInfo,
+				pLinIdx,
+				fpInitEntry
+			);
 			return PIX_SEARCH_ADDED;
 		}
 	} while((pEntry = pEntry->pNext));
@@ -217,7 +248,7 @@ void pixuctHTableRemove(
 	I32 alloc,
 	const void *pKeyData,
 	PixuctKey (* fpMakeKey)(const void *),
-	bool (* fpCompareEntry)(const PixuctHTableEntryCore *, const void *, const void *),
+	bool (* fpCmpEntry)(const PixuctHTableEntryCore *, const void *, const void *),
 	void (* fpClearEntry)(void *, PixuctHTableEntryCore *, const void *)
 ) {
 	PIX_ERR_ASSERT("", pHandle->pTable && pHandle->size);
@@ -226,13 +257,13 @@ void pixuctHTableRemove(
 		"",
 		alloc < PIX_HTABLE_ALLOC_HANDLES_MAX && pLinAlloc && pLinAlloc->valid
 	);
-	PIX_ERR_ASSERT("", fpMakeKey && fpCompareEntry);
+	PIX_ERR_ASSERT("", fpMakeKey && fpCmpEntry);
 	PixuctHTableBucket *pBucket = pixuctHTableBucketGet(pHandle, fpMakeKey(pKeyData));
 	PIX_ERR_ASSERT("unable to find specified entry", pBucket->pList)
 	PixuctHTableEntryCore *pEntry = pBucket->pList;
 	PixuctHTableEntryCore *pPrev = NULL;
 	do {
-		if (fpCompareEntry(pEntry, pKeyData, NULL)) {
+		if (fpCmpEntry(pEntry, pKeyData, NULL)) {
 			break;
 		}
 		PIX_ERR_ASSERT("unable to find specified entry", !pEntry->pNext);
@@ -257,19 +288,46 @@ SearchResult pixuctHTableGetConst(
 	const void *pKeyData,
 	const void **ppEntry,
 	PixuctKey (* fpMakeKey)(const void *),
-	bool (* fpCompareEntry)(const PixuctHTableEntryCore *, const void *, const void *)
+	bool (* fpCmpEntry)(const PixuctHTableEntryCore *, const void *, const void *)
 ) {
 	return pixuctHTableGet(
 		(void *)pHandle,
 		alloc,
 		pKeyData,
-		(void *)ppEntry,
+		(void **)ppEntry,
 		false,
+		NULL,
 		NULL,
 		fpMakeKey,
 		NULL,
 		NULL,
-		fpCompareEntry
+		fpCmpEntry
+	);
+}
+
+PIX_FORCE_INLINE
+SearchResult pixuctHTableBasicGet(
+	PixuctHTable *pHandle,
+	I32 alloc,
+	const void *pKeyData,
+	void **ppEntry,
+	bool addEntry,
+	I32 *pLinIdx,
+	PixuctKey (* fpMakeKey)(const void *),
+	bool (* fpCmpEntry)(const PixuctHTableEntryCore *, const void *, const void *)
+) {
+	return pixuctHTableGet(
+		pHandle,
+		alloc,
+		pKeyData,
+		ppEntry,
+		addEntry,
+		NULL,
+		pLinIdx,
+		fpMakeKey,
+		NULL,
+		NULL,
+		fpCmpEntry
 	);
 }
 
