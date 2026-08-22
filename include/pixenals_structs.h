@@ -90,6 +90,7 @@ typedef struct PixuctAvl {
 	PixalcLinAlloc *pAlloc;
 	PixuctAvlNodeCore root;
 	I32 count;
+	I32 memIdx;
 } PixuctAvl;
 
 typedef struct PixuctAvlStackEntry {
@@ -412,7 +413,10 @@ void pixuctAvlBalanceSet(PixuctAvlNodeCore *pNode, I32 val) {
 static inline
 PixErr pixuctAvlInit(PixuctAvl *pHandle, PixalcLinAlloc *pMem) {
 	PixErr err = PIX_ERR_SUCCESS;
-	*pHandle = (PixuctAvl){.pAlloc = pMem};
+	*pHandle = (PixuctAvl){
+		.pAlloc = pMem,
+		.memIdx = pixalcLinAllocGetCount(pMem)
+	};
 	//pixalcLinAllocInit(pAlloc, &pHandle->alloc, structSize, 6, false);
 	return err;
 }
