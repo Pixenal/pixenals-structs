@@ -267,7 +267,7 @@ void pixuctHTableRemove(
 		if (fpCmpEntry(pEntry, pKeyData, NULL)) {
 			break;
 		}
-		PIX_ERR_ASSERT("unable to find specified entry", !pEntry->pNext);
+		PIX_ERR_ASSERT("unable to find specified entry", pEntry->pNext);
 	} while(pPrev = pEntry, pEntry = pEntry->pNext);
 	if (pPrev) {
 		pPrev->pNext = pEntry->pNext;
