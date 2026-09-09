@@ -345,9 +345,7 @@ void pixuctHTableMemClear(PixuctHTableMem *pMem) {
 static inline
 void pixuctHTableMemDestroy(const PixalcFPtrs *pAlloc, PixuctHTableMem *pMem) {
 	PIX_ERR_ASSERT("", pMem);
-	if (pMem->buckets.pArr) {
-		pAlloc->fpFree(pMem->buckets.pArr);
-	}
+	PIXALC_DYN_ARR_DESTROY(pAlloc, &pMem->buckets);
 	for (I32 i = 0; i < pMem->entries.count; ++i) {
 		if (pMem->entries.pArr[i].valid) {
 			pixalcLinAllocDestroy(pMem->entries.pArr + i);

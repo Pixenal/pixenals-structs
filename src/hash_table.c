@@ -64,7 +64,7 @@ void pixuctHTableInit(
 		.size = size,
 	};
 	if (pMem) {
-		PIXALC_DYN_ARR_RESIZE(PixuctHTableBucket, pAlloc, &pMem->buckets, size);
+		PIXALC_DYN_ARR_RESIZE(pAlloc, &pMem->buckets, size);
 		memset(pMem->buckets.pArr, 0, sizeof(PixuctHTableBucket) * size);
 		pHandle->pTable = pMem->buckets.pArr;
 	}
