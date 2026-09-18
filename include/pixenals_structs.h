@@ -260,14 +260,18 @@ void pixuctHTableRemove(
 	);
 	PIX_ERR_ASSERT("", fpMakeKey && fpCmpEntry);
 	PixuctHTableBucket *pBucket = pixuctHTableBucketGet(pHandle, fpMakeKey(pKeyData));
-	PIX_ERR_ASSERT("unable to find specified entry", pBucket->pList)
+	if (!pBucket->pList) {
+		return;
+	}
 	PixuctHTableEntryCore *pEntry = pBucket->pList;
 	PixuctHTableEntryCore *pPrev = NULL;
 	do {
 		if (fpCmpEntry(pEntry, pKeyData, NULL)) {
 			break;
 		}
-		PIX_ERR_ASSERT("unable to find specified entry", pEntry->pNext);
+		if (!pEntry->pNext) {
+			return;
+		}
 	} while(pPrev = pEntry, pEntry = pEntry->pNext);
 	if (pPrev) {
 		pPrev->pNext = pEntry->pNext;
